@@ -2,7 +2,7 @@ import os
 import asyncio
 from flask import Flask, request, jsonify
 from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 import google.generativeai as genai
 
 # === НАЛАШТУВАННЯ ===
@@ -12,8 +12,10 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 if not TOKEN or not GEMINI_KEY:
     raise ValueError("Missing TELEGRAM_TOKEN or GEMINI_API_KEY")
 
-bot = Bot(token=TOKEN)
+# Ініціалізація Flask для веб-хука
 app = Flask(__name__)
+
+# Ініціалізація Gemini
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
@@ -23,8 +25,8 @@ SYSTEM_PROMPT = """Ти — оповідач у грі "Mystical Tales of Love".
 Відповідай атмосферно, таємничо, з легким відтінком меланхолії.
 Використовуй українську мову."""
 
-# === КОМАНДИ БОТА ===
-async def start(update, context):
+# === ОБРОБНИКИ КОМАНД ===
+async def start(update: Update, context):
     await update.message.reply_text(
         "🌙 Ласкаво просимо до *Mystical Tales of Love*…\n\n"
         "Тут кохання переплітається з містикою, а наслідки можуть бути непередбачуваними.\n"
@@ -32,18 +34,18 @@ async def start(update, context):
         parse_mode="Markdown"
     )
 
-async def handle_message(update, context):
+async def handle_message(update: Update, context):
     user_msg = update.message.text
     chat = model.start_chat(history=[])
     response = chat.send_message(f"{SYSTEM_PROMPT}\n\nГравець: {user_msg}")
     await update.message.reply_text(response.text[:4096])
 
-# === ОБРОБНИКИ ===
-dp = Dispatcher(bot, None)
-dp.add_handler(CommandHandler("start", start))
-dp.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+# === НАЛАШТУВАННЯ БОТА ===
+application = Application.builder().token(TOKEN).build()
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-# === СЕРВЕР ===
+# === ВЕБ-СЕРВЕР ДЛЯ RENDER ===
 @app.route('/')
 def index():
     return "Bot is running"
@@ -53,11 +55,13 @@ def health():
     return "OK"
 
 @app.route(f'/webhook/{TOKEN}', methods=['POST'])
-def webhook():
-    update = Update.de_json(request.get_json(), bot)
-    asyncio.run(dp.process_update(update))
+async def webhook():
+    update = Update.de_json(request.get_json(), application.bot)
+    await application.process_update(update)
     return 'ok'
 
+# === ЗАПУСК ===
 if __name__ == '__main__':
+    # Встановлюємо веб-хук
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
