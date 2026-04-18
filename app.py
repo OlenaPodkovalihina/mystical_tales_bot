@@ -28,6 +28,9 @@ app = Flask(__name__)
 # -------------------
 client = genai.Client(api_key=GEMINI_KEY)
 
+models = client.models.list()
+print([m.name for m in models])
+
 # -------------------
 # SYSTEM PROMPT
 # -------------------
