@@ -24,31 +24,9 @@ if not TOKEN or not GEMINI_KEY:
 app = Flask(__name__)
 
 # -------------------
-# GEMINI (NEW SDK)
+# GEMINI (NEW SDK ONLY)
 # -------------------
 client = genai.Client(api_key=GEMINI_KEY)
-
-# -------------------
-# PLAYER
-# -------------------
-player = {
-    "name": "Гелена Подкова",
-    "appearance": {
-        "age": 35,
-        "height": 158,
-        "hair_color": "біляве",
-        "eye_color": "сіро-зелені"
-    },
-    "traits": [
-        "рішуча",
-        "емоційна",
-        "вперта",
-        "цілеспрямована",
-        "легко ображається",
-        "непунктуальна",
-        "хаотична"
-    ]
-}
 
 # -------------------
 # SYSTEM PROMPT
@@ -58,21 +36,13 @@ SYSTEM_PROMPT = """
 
 СВІТ:
 Сучасна Україна під час війни.
-Віддалений готель Delissimo в лісі, оточений темними дорогами та тишею.
-
-ГОЛОВНА ГЕРОЇНЯ:
-Гелена Подкова, 35 років.
+Готель Delissimo в лісі.
 
 СТИЛЬ:
 - похмура атмосфера
 - психологічна напруга
-- реалістичні діалоги
-- персонажі реагують на вибори гравця
-
-ВАЖЛИВО:
-- не ігноруй дії гравця
-- NPC мають власні цілі
-- сюжет розвивається динамічно
+- живі NPC
+- реакція світу на гравця
 """
 
 # -------------------
@@ -99,15 +69,7 @@ def build_prompt(user_text):
     return f"""
 {SYSTEM_PROMPT}
 
-ГРАВЕЦЬ:
-Ім'я: {player['name']}
-Вік: {player['appearance']['age']}
-Зріст: {player['appearance']['height']}
-Очі: {player['appearance']['eye_color']}
-Волосся: {player['appearance']['hair_color']}
-Характер: {', '.join(player['traits'])}
-
-ДІЯ ГРАВЦЯ:
+ГРАВЕЦЬ ДІЄ:
 {user_text}
 """
 
@@ -125,15 +87,12 @@ def webhook():
         chat_id = data["message"]["chat"]["id"]
         user_text = data["message"].get("text", "")
 
-        # /start
+        # START
         if user_text == "/start":
-            send_message(
-                chat_id,
-                "🌙 Ти приїхала до готелю Delissimo...\n\nЩось у цьому місці не так."
-            )
+            send_message(chat_id, "🌙 Ти приїхала до Delissimo...\nСвіт реагує на тебе.")
             return "ok"
 
-        # GEMINI CALL (NEW SDK)
+        # GEMINI CALL (CLEAN SDK)
         try:
             prompt = build_prompt(user_text)
 
@@ -146,8 +105,7 @@ def webhook():
 
         except Exception as e:
             error_msg = str(e)
-            logging.error(f"GEMINI ERROR: {error_msg}")
-
+            logging.error(error_msg)
             send_error(chat_id, error_msg)
 
             story = "Магія на мить зникла..."
@@ -169,6 +127,4 @@ def index():
 # -------------------
 # RUN
 # -------------------
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+if __name__ == "__main
