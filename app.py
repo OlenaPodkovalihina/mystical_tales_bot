@@ -15,8 +15,8 @@ bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
 genai.configure(api_key=GEMINI_KEY)
-# ВИПРАВЛЕНО: замінено на актуальну модель
-model = genai.GenerativeModel('gemini-2.0-flash-exp')
+# ВИКОРИСТОВУЄМО СТАБІЛЬНУ МОДЕЛЬ
+model = genai.GenerativeModel('gemini-2.0-flash')
 
 SYSTEM_PROMPT = """Ти — оповідач у грі "Mystical Tales of Love".
 Відповідай українською, атмосферно, таємничо, з легким відтінком меланхолії."""
