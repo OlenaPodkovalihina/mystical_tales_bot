@@ -2,39 +2,50 @@ import os
 import logging
 from flask import Flask, request
 from telegram import Bot, Update
-from telegram.ext import Dispatcher, CommandHandler, MessageHandler, filters
 import google.generativeai as genai
+
+# Налаштування логування
+logging.basicConfig(level=logging.INFO)
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
+if not TOKEN or not GEMINI_KEY:
+    logging.error("Missing TELEGRAM_TOKEN or GEMINI_API_KEY")
+    raise ValueError("Missing tokens")
+
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
-dispatcher = Dispatcher(bot, None, use_context=True)
 
+# Налаштування Gemini
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-2.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')  # ВИКОРИСТОВУЄМО ПРАВИЛЬНУ МОДЕЛЬ!
 
-SYSTEM_PROMPT = "Ти — оповідач. Відповідай українською."
+SYSTEM_PROMPT = "Ти — оповідач у грі 'Mystical Tales of Love'. Відповідай українською, атмосферно."
 
-def start(update, context):
-    update.message.reply_text("🌙 Вітаю в Mystical Tales of Love!")
-
-def handle_message(update, context):
-    try:
-        user_msg = update.message.text
-        response = model.generate_content(f"{SYSTEM_PROMPT}\n\nГравець: {user_msg}")
-        update.message.reply_text(response.text[:4096])
-    except Exception as e:
-        update.message.reply_text("Вибач, сталася помилка. Спробуй ще раз.")
-
-dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
+# ОБРОБНИК WEBHOOK (БЕЗ Dispatcher)
 @app.route(f'/webhook/{TOKEN}', methods=['POST'])
 def webhook():
-    update = Update.de_json(request.get_json(), bot)
-    dispatcher.process_update(update)
+    try:
+        # Отримуємо оновлення від Telegram
+        update = Update.de_json(request.get_json(), bot)
+        
+        if update and update.message:
+            chat_id = update.message.chat_id
+            user_text = update.message.text
+            
+            # Обробка команди /start
+            if user_text == '/start':
+                bot.send_message(chat_id=chat_id, text="🌙 Ласкаво просимо до *Mystical Tales of Love*!\n\nНапиши щось, і я розпочну історію...", parse_mode='Markdown')
+                return 'ok'
+            
+            # Обробка звичайних текстових повідомлень
+            response = model.generate_content(f"{SYSTEM_PROMPT}\n\nГравець: {user_text}")
+            bot.send_message(chat_id=chat_id, text=response.text[:4096])
+            
+    except Exception as e:
+        logging.error(f"Помилка в webhook: {e}")
+    
     return 'ok'
 
 @app.route('/')
