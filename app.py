@@ -1,5 +1,5 @@
 import os
-import asyncio
+import logging
 from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
@@ -12,20 +12,24 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 if not TOKEN or not GEMINI_KEY:
     raise ValueError("Missing TELEGRAM_TOKEN or GEMINI_API_KEY")
 
-# Ініціалізація Flask для Render
+# Flask для healthcheck (щоб Render не вбивав бота)
 app = Flask(__name__)
 
 @app.route('/')
 def index():
     return "Bot is running"
 
+@app.route('/health')
+def health():
+    return "OK"
+
 # Ініціалізація Gemini
 genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel('gemini-1.5-flash')
 
-# === ТВІЙ ПЕРСОНАЖ ===
-SYSTEM_PROMPT = """Ти — оповідач у грі "Mystical Tales of Love".
-Ти ведеш гравця через похмурі містичні історії кохання в Україні.
+# === ТВІЙ ПЕРСОНАЖ (тимчасовий, потім заміниш на повний) ===
+SYSTEM_PROMPT = """Ти — оповідач у грі "Mystical Tales of Love: Delissimo".
+Гравець щойно приїхав до готелю. Опиши, що вона бачить: старий особняк, ліс навколо, тишу.
 Відповідай атмосферно, таємничо, з легким відтінком меланхолії.
 Використовуй українську мову."""
 
@@ -46,16 +50,21 @@ async def handle_message(update: Update, context):
 
 # === ЗАПУСК БОТА ===
 def main():
+    # Створюємо бота
     application = Application.builder().token(TOKEN).build()
+    
+    # Додаємо обробники
     application.add_handler(CommandHandler("start", start))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     
-    # Запускаємо Flask у фоновому потоці
+    # Запускаємо бота в режимі polling (простіше, ніж webhook)
+    print("Бот запущено в режимі polling...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+if __name__ == '__main__':
+    # Запускаємо Flask у фоновому потоці для healthcheck
     from threading import Thread
     Thread(target=lambda: app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 5000)))).start()
     
     # Запускаємо бота
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
-
-if __name__ == '__main__':
     main()
