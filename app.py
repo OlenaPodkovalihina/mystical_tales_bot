@@ -30,14 +30,6 @@ genai.configure(api_key=GEMINI_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
 
 # -------------------
-# WORLD STATE (простий “движок напруги”)
-# -------------------
-world_state = {
-    "tension": 10,   # загальна напруга в готелі
-    "risk": 5        # ризик подій
-}
-
-# -------------------
 # PLAYER
 # -------------------
 player = {
@@ -52,13 +44,15 @@ player = {
         "рішуча",
         "емоційна",
         "вперта",
+        "цілеспрямована",
+        "легко ображається",
         "непунктуальна",
-        "легко ображається"
+        "схильна до хаосу"
     ]
 }
 
 # -------------------
-# SYSTEM PROMPT (персонажі тепер тут)
+# SYSTEM PROMPT
 # -------------------
 SYSTEM_PROMPT = """
 Ти — оповідач у текстовій грі "Mystical Tales of Love".
@@ -68,29 +62,28 @@ SYSTEM_PROMPT = """
 
 ГОЛОВНА ГЕРОЇНЯ:
 Гелена Подкова, 35 років, 158 см, біляве волосся, сіро-зелені очі.
-Характер: рішуча, емоційна, вперта, непунктуальна, легко ображається.
 
 ПЕРСОНАЖІ:
 
 Андрій Омельченко:
 - Стриманий військовий
-- Діє через вчинки, не слова
-- Приховано прив’язаний до Гелени
+- Виражає емоції діями
+- Глибоко прив’язаний до Гелени
 
 Леонард Акерман:
 - Холодний стратег
-- Контроль, дисципліна, логіка
+- Дисципліна і контроль
 - Не терпить хаосу
 
 Арсен Єгер:
-- Емоційний, вибуховий
-- Ненавидить контроль
-- Діє імпульсивно
+- Емоційний, імпульсивний
+- Діє різко
+- Нестабільні реакції
 
-ПРАВИЛА:
+Правила:
 - Персонажі взаємодіють між собою
 - Світ реагує на дії гравця
-- Атмосфера напружена і жива
+- Атмосфера напружена і реалістична
 """
 
 # -------------------
@@ -98,36 +91,20 @@ SYSTEM_PROMPT = """
 # -------------------
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    requests.post(url, json={"chat_id": chat_id, "text": text})
+    requests.post(url, json={
+        "chat_id": chat_id,
+        "text": text
+    })
 
 # -------------------
-# WORLD REACTION ENGINE (гібрид)
+# ERROR SENDER (НОВЕ 🔥)
 # -------------------
-def world_tick(user_text):
-    text = user_text.lower()
-    reactions = []
-
-    # напруга росте від емоційних дій
-    if any(w in text for w in ["боюсь", "ні", "піти", "не хочу"]):
-        world_state["tension"] += 2
-        reactions.append("Андрій стає уважнішим до тебе.")
-
-    if "?" in text:
-        world_state["risk"] += 1
-        reactions.append("Леонард оцінює ситуацію холодно.")
-
-    if any(w in text for w in ["сміюся", "жарт", "провок"]):
-        world_state["tension"] += 3
-        reactions.append("Арсен реагує різкіше, ніж очікувалось.")
-
-    # загальна атмосфера
-    if world_state["tension"] > 20:
-        reactions.append("У повітрі відчувається напруга.")
-
-    if not reactions:
-        reactions.append("Delissimo залишається підозріло тихим.")
-
-    return "\n".join(reactions)
+def send_error(chat_id, error_text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, json={
+        "chat_id": chat_id,
+        "text": f"⚠️ ERROR:\n{error_text}"
+    })
 
 # -------------------
 # PROMPT BUILDER
@@ -136,11 +113,15 @@ def build_prompt(user_text):
     return f"""
 {SYSTEM_PROMPT}
 
-СТАН СВІТУ:
-Напруга: {world_state['tension']}
-Ризик подій: {world_state['risk']}
+ГРАВЕЦЬ:
+Ім'я: {player['name']}
+Вік: {player['appearance']['age']}
+Зріст: {player['appearance']['height']}
+Волосся: {player['appearance']['hair_color']}
+Очі: {player['appearance']['eye_color']}
+Характер: {', '.join(player['traits'])}
 
-ДІЯ ГРАВЦЯ:
+ДІЯ:
 {user_text}
 """
 
@@ -158,31 +139,33 @@ def webhook():
         chat_id = data["message"]["chat"]["id"]
         user_text = data["message"].get("text", "")
 
-        # START
+        # /start
         if user_text == "/start":
-            send_message(chat_id,
-                "🌙 Ти приїхала до Delissimo...\n\nСвіт реагує на тебе вже зараз."
+            send_message(
+                chat_id,
+                "🌙 Ти приїхала до готелю Delissimo...\n\nСвіт уже реагує на тебе."
             )
             return "ok"
 
-        # GEMINI STORY
+        # GEMINI
         try:
             prompt = build_prompt(user_text)
             response = model.generate_content(prompt)
             story = response.text
+
         except Exception as e:
-            logging.error(e)
+            error_msg = str(e)
+            logging.error(f"GEMINI ERROR: {error_msg}")
+
+            # 🔥 відправка помилки в Telegram
+            send_error(chat_id, error_msg)
+
             story = "Магія на мить зникла..."
 
-        # WORLD LAYER
-        world = world_tick(user_text)
-
-        final = f"{story}\n\n{world}"
-
-        send_message(chat_id, final[:4096])
+        send_message(chat_id, story[:4096])
 
     except Exception as e:
-        logging.error(f"Webhook error: {e}")
+        logging.error(f"WEBHOOK ERROR: {e}")
 
     return "ok"
 
