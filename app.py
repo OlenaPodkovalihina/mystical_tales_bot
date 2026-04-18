@@ -18,11 +18,13 @@ app = Flask(__name__)
 
 # Gemini
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash-latest')
+
+# 🔥 ВИПРАВЛЕНО: стабільна модель
+model = genai.GenerativeModel('gemini-pro')
 
 SYSTEM_PROMPT = "Ти — оповідач у грі 'Mystical Tales of Love'. Відповідай українською, атмосферно."
 
-# Функція відправки повідомлення
+# Відправка повідомлення в Telegram
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
@@ -40,7 +42,7 @@ def webhook():
     try:
         data = request.get_json()
 
-        if "message" not in data:
+        if not data or "message" not in data:
             return 'ok'
 
         chat_id = data["message"]["chat"]["id"]
@@ -48,7 +50,8 @@ def webhook():
 
         # /start
         if user_text == "/start":
-            send_message(chat_id,
+            send_message(
+                chat_id,
                 "🌙 Ласкаво просимо до *Mystical Tales of Love*!\n\n"
                 "Напиши щось, і я розпочну історію..."
             )
@@ -59,7 +62,9 @@ def webhook():
             response = model.generate_content(
                 f"{SYSTEM_PROMPT}\n\nГравець: {user_text}"
             )
-            text = response.text if response.text else "..."
+
+            text = response.text if response and response.text else "..."
+
         except Exception as e:
             logging.error(f"Gemini помилка: {e}")
             text = "⚠️ Сталася помилка при генерації історії."
