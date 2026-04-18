@@ -1,6 +1,8 @@
 import os
+import logging
 from flask import Flask, request
 from telegram import Bot, Update
+from telegram.ext import Dispatcher, CommandHandler, MessageHandler, filters
 import google.generativeai as genai
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -8,19 +10,31 @@ GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
+dispatcher = Dispatcher(bot, None, use_context=True)
 
 genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel('gemini-1.5-flash')
+model = genai.GenerativeModel('gemini-2.5-flash')
 
 SYSTEM_PROMPT = "Ти — оповідач. Відповідай українською."
+
+def start(update, context):
+    update.message.reply_text("🌙 Вітаю в Mystical Tales of Love!")
+
+def handle_message(update, context):
+    try:
+        user_msg = update.message.text
+        response = model.generate_content(f"{SYSTEM_PROMPT}\n\nГравець: {user_msg}")
+        update.message.reply_text(response.text[:4096])
+    except Exception as e:
+        update.message.reply_text("Вибач, сталася помилка. Спробуй ще раз.")
+
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
 @app.route(f'/webhook/{TOKEN}', methods=['POST'])
 def webhook():
     update = Update.de_json(request.get_json(), bot)
-    if update and update.message:
-        user_msg = update.message.text
-        response = model.generate_content(f"{SYSTEM_PROMPT}\n\nГравець: {user_msg}")
-        bot.send_message(chat_id=update.message.chat_id, text=response.text)
+    dispatcher.process_update(update)
     return 'ok'
 
 @app.route('/')
