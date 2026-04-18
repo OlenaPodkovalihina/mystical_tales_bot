@@ -10,7 +10,7 @@ from google import genai
 logging.basicConfig(level=logging.INFO)
 
 # -------------------
-# TOKENS
+# ENV VARIABLES
 # -------------------
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
@@ -19,12 +19,12 @@ if not TOKEN or not GEMINI_KEY:
     raise ValueError("Missing TELEGRAM_TOKEN or GEMINI_API_KEY")
 
 # -------------------
-# APP
+# FLASK APP
 # -------------------
 app = Flask(__name__)
 
 # -------------------
-# GEMINI (NEW SDK ONLY)
+# GEMINI CLIENT (NEW SDK)
 # -------------------
 client = genai.Client(api_key=GEMINI_KEY)
 
@@ -36,17 +36,17 @@ SYSTEM_PROMPT = """
 
 СВІТ:
 Сучасна Україна під час війни.
-Готель Delissimo в лісі.
+Віддалений готель Delissimo у лісі.
 
 СТИЛЬ:
 - похмура атмосфера
 - психологічна напруга
-- живі NPC
-- реакція світу на гравця
+- реалістичні реакції персонажів
+- розвиток сюжету через вибір гравця
 """
 
 # -------------------
-# TELEGRAM
+# TELEGRAM HELPERS
 # -------------------
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -54,6 +54,7 @@ def send_message(chat_id, text):
         "chat_id": chat_id,
         "text": text
     })
+
 
 def send_error(chat_id, error_text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -69,7 +70,7 @@ def build_prompt(user_text):
     return f"""
 {SYSTEM_PROMPT}
 
-ГРАВЕЦЬ ДІЄ:
+ДІЯ ГРАВЦЯ:
 {user_text}
 """
 
@@ -87,12 +88,12 @@ def webhook():
         chat_id = data["message"]["chat"]["id"]
         user_text = data["message"].get("text", "")
 
-        # START
+        # START COMMAND
         if user_text == "/start":
-            send_message(chat_id, "🌙 Ти приїхала до Delissimo...\nСвіт реагує на тебе.")
+            send_message(chat_id, "🌙 Ти приїхала до готелю Delissimo...\nЩось у цьому місці не так.")
             return "ok"
 
-        # GEMINI CALL (CLEAN SDK)
+        # GEMINI CALL
         try:
             prompt = build_prompt(user_text)
 
@@ -104,10 +105,8 @@ def webhook():
             story = response.text or "..."
 
         except Exception as e:
-            error_msg = str(e)
-            logging.error(error_msg)
-            send_error(chat_id, error_msg)
-
+            logging.error(f"GEMINI ERROR: {e}")
+            send_error(chat_id, str(e))
             story = "Магія на мить зникла..."
 
         send_message(chat_id, story[:4096])
@@ -125,6 +124,8 @@ def index():
     return "Bot is running"
 
 # -------------------
-# RUN
+# RUN SERVER
 # -------------------
-if __name__ == "__main
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
