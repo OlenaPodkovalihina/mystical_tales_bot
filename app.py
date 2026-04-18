@@ -4,83 +4,109 @@ import requests
 from flask import Flask, request
 import google.generativeai as genai
 
-# Логування
+# ---------------- LOGGING ----------------
 logging.basicConfig(level=logging.INFO)
 
+# ---------------- ENV ----------------
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GEMINI_KEY = os.environ.get("GEMINI_API_KEY")
 
-if not TOKEN or not GEMINI_KEY:
-    logging.error("Missing TELEGRAM_TOKEN or GEMINI_API_KEY")
-    raise ValueError("Missing tokens")
+if not TOKEN:
+    raise ValueError("Missing TELEGRAM_TOKEN")
+if not GEMINI_KEY:
+    raise ValueError("Missing GEMINI_API_KEY")
 
+# ---------------- APP ----------------
 app = Flask(__name__)
 
-# Gemini
+# ---------------- GEMINI ----------------
 genai.configure(api_key=GEMINI_KEY)
 
-# 🔥 ВИПРАВЛЕНО: стабільна модель
-model = genai.GenerativeModel('gemini-pro')
+# 🔥 СТАБІЛЬНА модель (якщо одна впаде — пробуємо іншу)
+MODELS = [
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-pro"
+]
 
-SYSTEM_PROMPT = "Ти — оповідач у грі 'Mystical Tales of Love'. Відповідай українською, атмосферно."
+SYSTEM_PROMPT = (
+    "Ти — оповідач у грі 'Mystical Tales of Love'. "
+    "Твоя задача — створювати атмосферні, короткі історії українською."
+)
 
-# Відправка повідомлення в Telegram
+def generate_text(prompt: str):
+    """Спроба викликати Gemini з fallback моделями"""
+    for m in MODELS:
+        try:
+            model = genai.GenerativeModel(m)
+            response = model.generate_content(prompt)
+
+            if response and response.text:
+                return response.text
+
+        except Exception as e:
+            logging.warning(f"Model {m} failed: {e}")
+
+    return None  # якщо все впало
+
+# ---------------- TELEGRAM ----------------
 def send_message(chat_id, text):
-    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     try:
+        url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         requests.post(url, json={
             "chat_id": chat_id,
             "text": text,
             "parse_mode": "Markdown"
         })
     except Exception as e:
-        logging.error(f"Помилка відправки: {e}")
+        logging.error(f"Telegram send error: {e}")
 
-# WEBHOOK
-@app.route(f'/webhook/{TOKEN}', methods=['POST'])
+# ---------------- WEBHOOK ----------------
+@app.route(f"/webhook/{TOKEN}", methods=["POST"])
 def webhook():
     try:
         data = request.get_json()
 
         if not data or "message" not in data:
-            return 'ok'
+            return "ok"
 
-        chat_id = data["message"]["chat"]["id"]
-        user_text = data["message"].get("text", "")
+        message = data["message"]
+        chat_id = message["chat"]["id"]
+        text = message.get("text", "")
 
         # /start
-        if user_text == "/start":
+        if text == "/start":
             send_message(
                 chat_id,
                 "🌙 Ласкаво просимо до *Mystical Tales of Love*!\n\n"
-                "Напиши щось, і я розпочну історію..."
+                "Напиши щось — і я створю історію ✨"
             )
-            return 'ok'
+            return "ok"
 
-        # Генерація відповіді
-        try:
-            response = model.generate_content(
-                f"{SYSTEM_PROMPT}\n\nГравець: {user_text}"
+        # генерація
+        prompt = f"{SYSTEM_PROMPT}\n\nГравець: {text}"
+        reply = generate_text(prompt)
+
+        # 🔥 FALLBACK (якщо Gemini впав)
+        if not reply:
+            reply = (
+                "🌙 Магія на мить зникла...\n"
+                "Але ти все ще стоїш у темному коридорі старого готелю."
             )
 
-            text = response.text if response and response.text else "..."
-
-        except Exception as e:
-            logging.error(f"Gemini помилка: {e}")
-            text = "⚠️ Сталася помилка при генерації історії."
-
-        send_message(chat_id, text[:4096])
+        send_message(chat_id, reply[:4096])
 
     except Exception as e:
-        logging.error(f"Помилка в webhook: {e}")
+        logging.exception("Webhook error")
 
-    return 'ok'
+    return "ok"
 
-# Перевірка сервера
-@app.route('/')
+# ---------------- HEALTH CHECK ----------------
+@app.route("/")
 def index():
     return "Bot is running"
 
-if __name__ == '__main__':
+# ---------------- RUN ----------------
+if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
