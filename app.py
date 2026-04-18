@@ -2,7 +2,7 @@ import os
 import logging
 import requests
 from flask import Flask, request
-import google.generativeai as genai
+from google import genai
 
 # -------------------
 # LOGGING
@@ -24,10 +24,9 @@ if not TOKEN or not GEMINI_KEY:
 app = Flask(__name__)
 
 # -------------------
-# GEMINI
+# GEMINI (NEW SDK)
 # -------------------
-genai.configure(api_key=GEMINI_KEY)
-model = genai.GenerativeModel("gemini-1.0-pro")
+client = genai.Client(api_key=GEMINI_KEY)
 
 # -------------------
 # PLAYER
@@ -47,7 +46,7 @@ player = {
         "цілеспрямована",
         "легко ображається",
         "непунктуальна",
-        "схильна до хаосу"
+        "хаотична"
     ]
 }
 
@@ -55,39 +54,29 @@ player = {
 # SYSTEM PROMPT
 # -------------------
 SYSTEM_PROMPT = """
-Ти — оповідач у текстовій грі "Mystical Tales of Love".
+Ти — оповідач інтерактивної текстової гри.
 
 СВІТ:
-Сучасна Україна під час війни. Віддалений готель Delissimo в лісі.
+Сучасна Україна під час війни.
+Віддалений готель Delissimo в лісі, оточений темними дорогами та тишею.
 
 ГОЛОВНА ГЕРОЇНЯ:
-Гелена Подкова, 35 років, 158 см, біляве волосся, сіро-зелені очі.
+Гелена Подкова, 35 років.
 
-ПЕРСОНАЖІ:
+СТИЛЬ:
+- похмура атмосфера
+- психологічна напруга
+- реалістичні діалоги
+- персонажі реагують на вибори гравця
 
-Андрій Омельченко:
-- Стриманий військовий
-- Виражає емоції діями
-- Глибоко прив’язаний до Гелени
-
-Леонард Акерман:
-- Холодний стратег
-- Дисципліна і контроль
-- Не терпить хаосу
-
-Арсен Єгер:
-- Емоційний, імпульсивний
-- Діє різко
-- Нестабільні реакції
-
-Правила:
-- Персонажі взаємодіють між собою
-- Світ реагує на дії гравця
-- Атмосфера напружена і реалістична
+ВАЖЛИВО:
+- не ігноруй дії гравця
+- NPC мають власні цілі
+- сюжет розвивається динамічно
 """
 
 # -------------------
-# TELEGRAM SEND
+# TELEGRAM
 # -------------------
 def send_message(chat_id, text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -96,9 +85,6 @@ def send_message(chat_id, text):
         "text": text
     })
 
-# -------------------
-# ERROR SENDER (НОВЕ 🔥)
-# -------------------
 def send_error(chat_id, error_text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, json={
@@ -117,11 +103,11 @@ def build_prompt(user_text):
 Ім'я: {player['name']}
 Вік: {player['appearance']['age']}
 Зріст: {player['appearance']['height']}
-Волосся: {player['appearance']['hair_color']}
 Очі: {player['appearance']['eye_color']}
+Волосся: {player['appearance']['hair_color']}
 Характер: {', '.join(player['traits'])}
 
-ДІЯ:
+ДІЯ ГРАВЦЯ:
 {user_text}
 """
 
@@ -143,21 +129,25 @@ def webhook():
         if user_text == "/start":
             send_message(
                 chat_id,
-                "🌙 Ти приїхала до готелю Delissimo...\n\nСвіт уже реагує на тебе."
+                "🌙 Ти приїхала до готелю Delissimo...\n\nЩось у цьому місці не так."
             )
             return "ok"
 
-        # GEMINI
+        # GEMINI CALL (NEW SDK)
         try:
             prompt = build_prompt(user_text)
-            response = model.generate_content(prompt)
-            story = response.text
+
+            response = client.models.generate_content(
+                model="gemini-1.5-flash",
+                contents=prompt
+            )
+
+            story = response.text or "..."
 
         except Exception as e:
             error_msg = str(e)
             logging.error(f"GEMINI ERROR: {error_msg}")
 
-            # 🔥 відправка помилки в Telegram
             send_error(chat_id, error_msg)
 
             story = "Магія на мить зникла..."
