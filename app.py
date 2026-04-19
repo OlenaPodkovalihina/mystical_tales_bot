@@ -236,7 +236,6 @@ def build_prompt(user_text, session):
 
 Особливості:
 {", ".join(PLAYER['abilities'])}
-"""
 
 ПЕРСОНАЖ:
 {leonard['description']}
@@ -250,7 +249,7 @@ def build_prompt(user_text, session):
 {history_text}
 
 СЮЖЕТ:
-- якщо Леонард ще не зустрінутий — введи його природно
+- якщо Леонард ще не зустрінутий - введи його природно
 - перша зустріч напружена
 - він не відкривається одразу
 
@@ -328,7 +327,6 @@ def webhook():
             send_error(chat_id, str(e))
             story = "Магія на мить зникла..."
 
-        send_message(chat_id, story[:4096])
 
     except Exception as e:
         logging.error(f"WEBHOOK ERROR: {e}")
