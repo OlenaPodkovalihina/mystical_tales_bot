@@ -23,6 +23,18 @@ if not TOKEN or not GEMINI_KEY:
 # -------------------
 app = Flask(__name__)
 
+sessions = {}
+
+def get_session(chat_id):
+    if chat_id not in sessions:
+        sessions[chat_id] = {
+            "history": [],
+            "state": {
+                "location": "дорога до готелю"
+            }
+        }
+    return sessions[chat_id]
+
 # -------------------
 # GEMINI CLIENT (NEW SDK)
 # -------------------
@@ -95,9 +107,73 @@ PLAYER = {
     ]
 }
 
+CHARACTERS = {
+    "leonard": {
+        "name": "Леонард Акерман",
+        "age": 34,
+        "met": False,
+        "trust": 0,
+
+        "description": f"""
+Леонард Акерман, 34 роки.
+
+Військове звання: майор Збройних сил України
+
+Зовнішність:
+- зріст: 162 см
+- волосся: чорне, коротке
+- очі: сіро-блакитні
+- статура: жилава, м'язиста
+- особливість: шрам на лівій щоці
+
+Характер:
+- дисциплінований, холодний, раціональний
+- не терпить слабкість і хаос
+- говорить коротко і по суті
+
+Поведінка:
+- у стресі: ще холодніший, діє швидко
+- у стосунках: контролює дистанцію, захищає діями
+- емоції приховує
+
+Особливість:
+- довіра = рідкість
+- якщо довіряє — захищає до кінця
+
+Навички:
+- управління FPV-дронами
+- швидке прийняття рішень
+- рукопашний бій
+
+Любить:
+- чорний чай без цукру
+- чистота і порядок
+- точність
+
+Не любить:
+- хаос
+- балакучість
+- виправдання
+- непунктуальність
+- жалість до себе
+- марнування часу
+- кава
+
+Стосунки:
+- контролює дистанцію, не дозволяє собі слабкості
+- якщо прив’язується — це проявляється як контроль, захист і жорсткі рішення замість слів
+
+Бекграунд:
+- виріс сиротою
+- усиновлений у Німеччині
+- повернувся в Україну у 2022
+- минуле приховує
+"""
+    }
+}
 
 PLAYER_IMG = "https://drive.google.com/uc?export=view&id=1rsO3DJhpfBgGu2l9oS2MLCqhwxnyJdYj"
-
+LEONARD_IMG = "https://drive.google.com/uc?export=view&id=1_md3nAXLV5f08ohqHKOwuAEn8MNb_5W9"
 
 # -------------------
 # TELEGRAM HELPERS
@@ -127,8 +203,16 @@ def send_error(chat_id, error_text):
 # -------------------
 # PROMPT BUILDER
 # -------------------
-def build_prompt(user_text):
-    player_text = f"""
+def build_prompt(user_text, session):
+    history_text = "\n".join(
+        [f"{m['role']}: {m['text']}" for m in session["history"][-6:]]
+    )
+
+    leonard = CHARACTERS["leonard"]
+
+    return f"""
+{SYSTEM_PROMPT}
+
 ГРАВЕЦЬ:
 {PLAYER['name']} ({PLAYER['age']} років, жінка)
 
@@ -154,15 +238,28 @@ def build_prompt(user_text):
 {", ".join(PLAYER['abilities'])}
 """
 
-    return f"""
-{SYSTEM_PROMPT}
+ПЕРСОНАЖ:
+{leonard['description']}
 
-{player_text}
+СТАН ГРИ:
+- локація: {session['state']['location']}
+- Леонард зустрінутий: {leonard['met']}
+- рівень довіри: {leonard['trust']}
+
+ІСТОРІЯ:
+{history_text}
+
+СЮЖЕТ:
+- якщо Леонард ще не зустрінутий — введи його природно
+- перша зустріч напружена
+- він не відкривається одразу
 
 ПРАВИЛА:
 - Завжди використовуй жіночий рід щодо гравця
 - Не змінюй її характер
 - Пам’ятай її особливості
+- пам’ятай події
+- не ламай характер персонажів
 
 ДІЯ ГРАВЦЯ:
 {user_text}
@@ -190,7 +287,8 @@ def webhook():
 
         # GEMINI CALL
         try:
-            prompt = build_prompt(user_text)
+            session = get_session(chat_id)
+            prompt = build_prompt(user_text, session)
 
             response = client.models.generate_content(
                 model="gemini-2.5-flash",
@@ -198,6 +296,32 @@ def webhook():
             )
 
             story = response.text or "..."
+            
+            # 💾 ПАМ’ЯТЬ
+            session["history"].append({"role": "user", "text": user_text})
+            session["history"].append({"role": "ai", "text": story})
+
+            # 🎭 ЛОГІКА ЛЕОНАРДА
+            leonard = CHARACTERS["leonard"]
+
+            # перша поява
+            if not leonard["met"] and "Леонард" in story:
+                leonard["met"] = True
+                send_photo(chat_id, LEONARD_IMG, "Перед тобою з’являється чоловік...")
+
+            # система довіри
+            if leonard["met"]:
+                text = user_text.lower()
+
+                if any(word in text for word in ["допомогти", "разом", "довіряю"]):
+                    leonard["trust"] += 1
+
+                if any(word in text for word in ["йди", "відстань", "не чіпай"]):
+                    leonard["trust"] -= 1
+
+            # 📤 ВІДПРАВКА
+            send_message(chat_id, story[:4096])
+
 
         except Exception as e:
             logging.error(f"GEMINI ERROR: {e}")
