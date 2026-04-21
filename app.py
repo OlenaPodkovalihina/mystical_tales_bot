@@ -3,6 +3,8 @@ import logging
 import requests
 from flask import Flask, request
 from google import genai
+import json
+import psycopg2
 
 # -------------------
 # LOGGING
@@ -19,21 +21,61 @@ if not TOKEN or not GEMINI_KEY:
     raise ValueError("Missing TELEGRAM_TOKEN or GEMINI_API_KEY")
 
 # -------------------
+# TABLE
+# -------------------
+
+def get_db():
+    return psycopg2.connect(os.environ["DATABASE_URL"])
+
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS sessions (
+        chat_id TEXT PRIMARY KEY,
+        data JSONB
+    )
+    """)
+
+    conn.commit()
+    conn.close()
+
+init_db()
+
+# -------------------
 # FLASK APP
 # -------------------
 app = Flask(__name__)
 
-sessions = {}
 
 def get_session(chat_id):
-    if chat_id not in sessions:
-        sessions[chat_id] = {
-            "history": [],
-            "state": {
-                "location": "дорога до готелю"
+    chat_id = str(chat_id)
+
+    session = load_session(chat_id)
+
+    if session:
+        return session
+
+    # якщо нема — створюємо нову
+    session = {
+        "history": [],
+        "state": {
+            "location": "дорога до готелю"
+        },
+        "characters": {
+            "leonard": {
+                "met": False,
+                "trust": 0
             }
-        }
-    return sessions[chat_id]
+        },
+        "branch": "Тіні минулого", 
+        "active_character": "leonard"
+    }
+
+    save_session(chat_id, session)
+
+    return session
 
 # -------------------
 # GEMINI CLIENT (NEW SDK)
@@ -43,15 +85,71 @@ client = genai.Client(api_key=GEMINI_KEY)
 models = client.models.list()
 print([m.name for m in models])
 
+MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-flash-latest"
+]
+
+def generate_with_fallback(prompt):
+    for model in MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt
+            )
+            return response.text
+        except Exception as e:
+            logging.warning(f"{model} failed: {e}")
+
+    return "Магія зникла... спробуй ще раз."
+
 # -------------------
 # SYSTEM PROMPT
 # -------------------
 SYSTEM_PROMPT = """
 Ти — оповідач інтерактивної текстової гри.
 
+WORLD = """
 СВІТ:
-Сучасна Україна під час війни.
-Віддалений готель Delissimo у лісі.
+
+- Реальність: сучасна Україна під час війни
+- Атмосфера: напруга, небезпека, невідомість
+- У світі можуть існувати:
+    - військові
+    - цивільні
+    - покинуті місця
+    - аномальні явища
+
+ПРАВИЛА СВІТУ:
+- персонажі поводяться реалістично
+- небезпека завжди присутня
+- рішення мають наслідки
+- довіра між людьми формується повільно
+- містика існує, але не пояснюється одразу
+
+ЛОКАЦІЇ МОЖУТЬ ЗМІНЮВАТИСЯ:
+- готель
+- місто
+- ліс
+- кладовище
+- військова база
+"""
+
+ГІЛКА:
+{branch}
+
+СЮЖЕТ ГІЛКИ "ТІНІ МИНУЛОГО":
+- 20 років тому в готелі Delissimo були вбиті всі мешканці
+- вбивцю не знайшли
+- готель закрили
+- нещодавно його відкрили після ремонту
+- щось у цьому місці залишилось
+
+ЗАВДАННЯ:
+- з’ясувати, що сталося
+- знайти правду
+- вижити
 
 СТИЛЬ:
 - похмура атмосфера
@@ -162,6 +260,7 @@ CHARACTERS = {
 Стосунки:
 - контролює дистанцію, не дозволяє собі слабкості
 - якщо прив’язується — це проявляється як контроль, захист і жорсткі рішення замість слів
+- довіра Леонарда впливає на його поведінку
 
 Бекграунд:
 - виріс сиротою
@@ -174,6 +273,77 @@ CHARACTERS = {
 
 PLAYER_IMG = "https://drive.google.com/uc?export=view&id=1rsO3DJhpfBgGu2l9oS2MLCqhwxnyJdYj"
 LEONARD_IMG = "https://drive.google.com/uc?export=view&id=1_md3nAXLV5f08ohqHKOwuAEn8MNb_5W9"
+
+
+# =========================
+# 🧠 LEONARD AI CORE
+# =========================
+
+TRUST_STATES = [
+    {"min": -999, "max": -2, "mode": "hostile", "tone": "холодний, різкий, відсторонений"},
+    {"min": -1, "max": 5, "mode": "neutral", "tone": "стриманий, професійний"},
+    {"min": 5, "max": 15, "mode": "curious", "tone": "уважний, більше взаємодії"},
+    {"min": 15, "max": 30, "mode": "bonded", "tone": "захисний, інколи м’який, приховано емоційний"},
+    {"min": 30, "max": 50, "mode": "sympathy", "tone": "рідкісні погляди, спостерігає здалеку, провокує на емоції, злегка піддражнює"},
+    {"min": 50, "max": 75, "mode": "inlove", "tone": "захищає, але грубо, без ніжності, шукає привід бути поруч, ревнує"},
+    {"min": 75, "max": 999, "mode": "relationships", "tone": "втрачає контроль, діє імпульсивно, поцілунки, близкість"},
+]
+
+
+def get_trust_state(trust: int):
+    for state in TRUST_STATES:
+        if state["min"] <= trust <= state["max"]:
+            return state
+    return TRUST_STATES[1]
+
+
+def update_leonard_trust(leonard, user_text: str):
+    text = user_text.lower()
+
+    # 🔵 довіра через співпрацю
+    if any(w in text for w in ["допомогти", "разом", "довіряю", "залишаюсь", "дякую", "ти мав рацію", "в безпеці", "ти захистив мене"]):
+        leonard["trust"] += 1
+
+    # 🟡 виклик = повага (як ти і хотіла)
+    if any(w in text for w in ["я сама", "не командуй", "ти помиляєшся", "я можу", "я впораюся"]):
+        leonard["trust"] += 1
+
+    # 🔴 відштовхування
+    if any(w in text for w in ["йди", "відстань", "не чіпай", "ти повинен", "твоя помилка", "твоя вина"]):
+        leonard["trust"] -= 2
+
+    # 🟡 виклик = закоханість
+    if any(w in text for w in ["я тебе не боюся", "я не відступлю", "я не здаюся", "ти милий", "ти дурень", "ти теплий", "ти врятував"]):    
+        leonard["trust"] += 3
+
+
+def generate_leonard_thought(leonard, player_text: str):
+    trust_state = get_trust_state(leonard["trust"])
+
+    if trust_state["mode"] == "hostile":
+        return "(Контроль втрачати не можна.)"
+
+    if trust_state["mode"] == "neutral":
+        return "(Спостерігаю. Поки нічого зайвого.)"
+
+    if trust_state["mode"] == "curious":
+        return "(Вона не реагує як більшість. Це цікаво.)"
+
+    if trust_state["mode"] == "bonded":
+        return "(Вона тримається. Це… добре.)"
+
+    if trust_state["mode"] == "sympathy":
+        return "(Вона привернула мою увагу.)"
+
+    if trust_state["mode"] == "inlove":
+        return "(Я закохуюся?... Це неможливо.)"
+
+    if trust_state["mode"] == "relationships":
+        return "(Вона моя)"
+
+def get_leonard_behavior(leonard):
+    return get_trust_state(leonard["trust"])["tone"]
+
 
 # -------------------
 # TELEGRAM HELPERS
@@ -193,12 +363,57 @@ def send_photo(chat_id, photo_url, caption=""):
         "caption": caption
     })
 
+def send_main_menu(chat_id):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    requests.post(url, json={
+        "chat_id": chat_id,
+        "text": "Обери дію:",
+        "reply_markup": {
+            "keyboard": [
+                ["💾 Зберегти історію"]
+            ],
+            "resize_keyboard": True
+        }
+    })
+
 def send_error(chat_id, error_text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     requests.post(url, json={
         "chat_id": chat_id,
         "text": f"⚠️ ERROR:\n{error_text}"
     })
+
+# -------------------
+# LOAD AND SAVE
+# -------------------
+def load_session(chat_id):
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("SELECT data FROM sessions WHERE chat_id = %s", (chat_id,))
+    row = cur.fetchone()
+
+    conn.close()
+
+    if row:
+        return json.loads(row[0])
+
+    return None
+
+
+def save_session(chat_id, session_data):
+    conn = get_db()
+    cur = conn.cursor()
+
+    cur.execute("""
+    INSERT INTO sessions (chat_id, data)
+    VALUES (%s, %s)
+    ON CONFLICT (chat_id)
+    DO UPDATE SET data = EXCLUDED.data
+    """, (chat_id, json.dumps(session_data)))
+
+    conn.commit()
+    conn.close()
 
 # -------------------
 # PROMPT BUILDER
@@ -208,10 +423,16 @@ def build_prompt(user_text, session):
         [f"{m['role']}: {m['text']}" for m in session["history"][-6:]]
     )
 
-    leonard = CHARACTERS["leonard"]
+    leonard = session["characters"]["leonard"]
+
+    leonard_thought = generate_leonard_thought(leonard, user_text)
+    behavior_tone = get_leonard_behavior(leonard)
+    branch = session.get("branch", "Тіні минулого") 
+    active_character = session.get("active_character", "leonard")  
 
     return f"""
 {SYSTEM_PROMPT}
+{WORLD}
 
 ГРАВЕЦЬ:
 {PLAYER['name']} ({PLAYER['age']} років, жінка)
@@ -240,10 +461,21 @@ def build_prompt(user_text, session):
 ПЕРСОНАЖ:
 {leonard['description']}
 
+АКТИВНИЙ ПЕРСОНАЖ:
+Леонард Акерман
+- відповіді повинні відображати його характер, стиль мислення і поведінку
+- його внутрішній стан впливає на тон сцени
+
 СТАН ГРИ:
 - локація: {session['state']['location']}
 - Леонард зустрінутий: {leonard['met']}
 - рівень довіри: {leonard['trust']}
+
+ПОВЕДІНКА ЛЕОНАРДА:
+- тон: {behavior_tone}
+
+ВНУТРІШНІ ДУМКИ ЛЕОНАРДА (НЕ ДЛЯ ГРАВЦЯ, АЛЕ МОЖУТЬ ІНОДІ З’ЯВЛЯТИСЯ В ТЕКСТІ):
+{leonard_thought}
 
 ІСТОРІЯ:
 {history_text}
@@ -259,6 +491,8 @@ def build_prompt(user_text, session):
 - Пам’ятай її особливості
 - пам’ятай події
 - не ламай характер персонажів
+- показуй думки Леонарда в дужках ()
+- думки не завжди озвучуються вголос
 
 ДІЯ ГРАВЦЯ:
 {user_text}
@@ -280,28 +514,58 @@ def webhook():
 
         # START COMMAND
         if user_text == "/start":
+            session = get_session(chat_id)
+            save_session(chat_id, session)
+
             send_photo(chat_id, PLAYER_IMG, "Це ти.")
-            send_message(chat_id, "🌙 Ти приїхала до готелю Delissimo...\nЩось у цьому місці не так.")
+            send_message(chat_id, """
+               Я приїхала в містечко Ясіня у відпустку.
+
+               Дорога була виснажливою — майже добу в поїзді.
+               Потім ще дві години очікування автобуса.
+
+               Від автовокзалу дорога йде вздовж кількох магазинів.
+               Далі — зупинка.
+
+               Тепер мені потрібно чекати ще один автобус, який зупиняється біля готелю Delissimo.
+
+               Йти пішки — не варіант. Сумка важка.
+
+               Навколо нікого.
+               Магазини вже зачинені.
+               Ліс підступає майже впритул.
+
+               І починається дощ.
+
+               Я втомлена.
+               Голодна.
+               І замерзла.
+               """)
+
+
+            send_main_menu(chat_id) 
             return "ok"
+
+       # 💾 SAVE COMMAND
+       if user_text == "💾 Зберегти історію":
+           session = get_session(chat_id)  # важливо!
+           save_session(chat_id, session)
+           send_message(chat_id, "💾 Історію збережено.")
+           return "ok"
 
         # GEMINI CALL
         try:
             session = get_session(chat_id)
             prompt = build_prompt(user_text, session)
 
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt
-            )
-
-            story = response.text or "..."
+            story = generate_with_fallback(prompt)
             
             # 💾 ПАМ’ЯТЬ
             session["history"].append({"role": "user", "text": user_text})
             session["history"].append({"role": "ai", "text": story})
 
             # 🎭 ЛОГІКА ЛЕОНАРДА
-            leonard = CHARACTERS["leonard"]
+            leonard = session["characters"]["leonard"]
 
             # перша поява
             if not leonard["met"] and "Леонард" in story:
@@ -310,22 +574,18 @@ def webhook():
 
             # система довіри
             if leonard["met"]:
-                text = user_text.lower()
+                update_leonard_trust(leonard, user_text)
 
-                if any(word in text for word in ["допомогти", "разом", "довіряю"]):
-                    leonard["trust"] += 1
+            # 💾 SAVE
+            save_session(chat_id, session)
 
-                if any(word in text for word in ["йди", "відстань", "не чіпай"]):
-                    leonard["trust"] -= 1
-
-            # 📤 ВІДПРАВКА
+            # 📤 SEND
             send_message(chat_id, story[:4096])
-
 
         except Exception as e:
             logging.error(f"GEMINI ERROR: {e}")
             send_error(chat_id, str(e))
-            story = "Магія на мить зникла..."
+            return "ok"
 
 
     except Exception as e:
