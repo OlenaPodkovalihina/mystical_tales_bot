@@ -542,12 +542,12 @@ def webhook():
             send_main_menu(chat_id) 
             return "ok"
 
-       # 💾 SAVE COMMAND
-       if user_text == "💾 Зберегти історію":
-           session = get_session(chat_id)  # важливо!
-           save_session(chat_id, session)
-           send_message(chat_id, "💾 Історію збережено.")
-           return "ok"
+        # 💾 SAVE COMMAND
+        if user_text == "💾 Зберегти історію":
+            session = get_session(chat_id)  # важливо!
+            save_session(chat_id, session)
+            send_message(chat_id, "💾 Історію збережено.")
+            return "ok"
 
         # GEMINI CALL
         try:
