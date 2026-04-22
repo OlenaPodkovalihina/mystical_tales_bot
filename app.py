@@ -455,7 +455,7 @@ def build_prompt(user_text, session):
 {", ".join(PLAYER['abilities'])}
 
 ПЕРСОНАЖ:
-{leonard['description']}
+{CHARACTERS['leonard']['description']}
 
 АКТИВНИЙ ПЕРСОНАЖ:
 Леонард Акерман
