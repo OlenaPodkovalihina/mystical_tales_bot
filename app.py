@@ -392,7 +392,7 @@ def load_session(chat_id):
     conn.close()
 
     if row:
-        return json.loads(row[0])
+        return row[0]
 
     return None
 
@@ -406,7 +406,7 @@ def save_session(chat_id, session_data):
     VALUES (%s, %s)
     ON CONFLICT (chat_id)
     DO UPDATE SET data = EXCLUDED.data
-    """, (chat_id, json.dumps(session_data)))
+    """, (chat_id, session_data))
 
     conn.commit()
     conn.close()
