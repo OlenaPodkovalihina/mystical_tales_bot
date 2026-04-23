@@ -51,30 +51,41 @@ app = Flask(__name__)
 
 def get_session(chat_id):
     chat_id = str(chat_id)
-
     session = load_session(chat_id)
+    updated = False  # Прапорець, який покаже, чи міняли ми щось
 
-    if session:
-        return session
+    # 1. Якщо сесії взагалі немає
+    if not session:
+        session = {
+            "history": [],
+            "state": {"location": "дорога до готелю"},
+            "characters": {
+                "leonard": {"met": False, "trust": 0}
+            },
+            "branch": "Тіні минулого",
+            "active_character": "leonard"
+        }
+        updated = True
+    else:
+        # 2. Перевіряємо стару сесію на наявність усіх полів (валідація)
+        if "history" not in session:
+            session["history"] = []
+            updated = True
+        if "characters" not in session:
+            session["characters"] = {"leonard": {"met": False, "trust": 0}}
+            updated = True
+        if "state" not in session:
+            session["state"] = {"location": "дорога до готелю"}
+            updated = True
+        if "active_character" not in session:
+            session["active_character"] = "leonard"
+            updated = True
 
-    # якщо нема — створюємо нову
-    session = {
-        "history": [],
-        "state": {
-            "location": "дорога до готелю"
-        },
-        "characters": {
-            "leonard": {
-                "met": False,
-                "trust": 0
-            }
-        },
-        "branch": "Тіні минулого", 
-        "active_character": "leonard"
-    }
-
-    save_session(chat_id, session)
-
+    # 3. Зберігаємо ТІЛЬКИ якщо були зміни в структурі
+    if updated:
+        logging.info(f"Оновлення структури сесії для {chat_id}")
+        save_session(chat_id, session)
+    
     return session
 
 # -------------------
@@ -386,14 +397,20 @@ def load_session(chat_id):
     conn = get_db()
     cur = conn.cursor()
 
-    cur.execute("SELECT data FROM sessions WHERE chat_id = %s", (chat_id,))
+    cur.execute("SELECT data FROM sessions WHERE chat_id = %s", (str(chat_id,)))
     row = cur.fetchone()
 
     conn.close()
 
     if row:
-        return row[0] if isinstance(row[0], dict) else json.loads(row[0])
-
+        data = row[0]
+        # Якщо база повернула рядок замість об'єкта — перетворюємо
+        if isinstance(data, str):
+            try:
+                return json.loads(data)
+            except:
+                return None
+        return data  # Якщо це вже dict (словник), повертаємо як є
     return None
 
 
