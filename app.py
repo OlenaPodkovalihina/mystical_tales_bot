@@ -418,14 +418,14 @@ def save_session(chat_id, session_data):
     conn = get_db()
     cur = conn.cursor()
 
-    json_data = json.dumps(session_data)
+    serialized_data = json.dumps(session_data)
 
     cur.execute("""
     INSERT INTO sessions (chat_id, data)
     VALUES (%s, %s)
     ON CONFLICT (chat_id)
     DO UPDATE SET data = EXCLUDED.data
-    """, (str(chat_id), json._data))
+    """, (str(chat_id), serialized_data))
 
     conn.commit()
     conn.close()
