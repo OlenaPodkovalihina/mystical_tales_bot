@@ -618,7 +618,11 @@ def webhook():
             session = get_session(chat_id)
             prompt = build_prompt(user_text, session)
 
-            story = generate_with_fallback(prompt)
+            # Отримуємо число довіри з сесії
+            current_trust = session["characters"]["leonard"]["trust"]
+
+            # Передаємо обидва аргументи у функцію
+            story = generate_with_fallback(prompt, current_trust)
             
             # 💾 ПАМ’ЯТЬ
             session["history"].append({"role": "user", "text": user_text})
