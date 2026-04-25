@@ -96,24 +96,69 @@ client = genai.Client(api_key=GEMINI_KEY)
 models = client.models.list()
 print([m.name for m in models])
 
+# 1. Виносимо конфіг окремо, щоб не дублювати
+GENERATION_CONFIG = {
+    "temperature": 0.85,
+    "top_p": 0.95,
+    "max_output_tokens": 1000,
+}
+
+# Твій список моделей (я додав сюди Pro, бо для дослідника це важливо)
 MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-flash-latest"
+    "gemini-2.5-pro",    # Найрозумніша — для душі та драми
+    "gemini-2.5-flash",  # Швидка і сучасна
+    "gemini-2.0-flash"   # Надійний запасний варіант
 ]
 
-def generate_with_fallback(prompt):
-    for model in MODELS:
+def generate_with_fallback(prompt, leonard_trust_value):
+    # 1. Отримуємо опис поточного стану довіри
+    state = get_trust_state(leonard_trust_value)
+    
+    # 2. Формуємо динамічну системну інструкцію (контекст для AI)
+    # Ми вставляємо всі твої змінні (WORLD, PLAYER, CHARACTERS) прямо сюди
+    system_instruction = f"""
+{SYSTEM_PROMPT}
+
+{WORLD}
+
+ГРАВЕЦЬ (Гелена):
+- Опис: {PLAYER['appearance']['height']}, {PLAYER['appearance']['hair']}, {PLAYER['appearance']['eyes']}
+- Характер: {", ".join(PLAYER['personality'])}
+- Особливість: {", ".join(PLAYER['abilities'])}
+
+ПЕРСОНАЖ (Леонард):
+{CHARACTERS['leonard']['description']}
+
+ПОТОЧНИЙ ПСИХОЛОГІЧНИЙ СТАН ЛЕОНАРДА:
+- Рівень довіри: {leonard_trust_value}
+- Режим поведінки: {state['mode']}
+- Тон розмови: {state['tone']}
+
+ОБОВ'ЯЗКОВІ ПРАВИЛА ВІДПОВІДІ:
+1. Починай кожну відповідь з внутрішніх думок у дужках ( ). 
+2. Думки мають бути максимально емоційними, щирими і часто суперечити холодним словам Леонарда.
+3. НІКОЛИ не пиши як асистент. Ти — Майор у небезпечному готелі.
+4. Якщо Гелена поводиться вперто або хаотично, Леонард може дратуватися зовні, але всередині (у думках) він починає поважати її за силу духу, якщо Trust > 5.
+"""
+
+    # 3. Цикл перемикання моделей (Fallback)
+    for model_id in MODELS:
         try:
             response = client.models.generate_content(
-                model=model,
-                contents=prompt
+                model=model_id,
+                contents=prompt,
+                config={
+                    "system_instruction": system_instruction,
+                    "temperature": GENERATION_CONFIG["temperature"],
+                    "top_p": GENERATION_CONFIG["top_p"],
+                    "max_output_tokens": GENERATION_CONFIG["max_output_tokens"],
+                }
             )
             return response.text
         except Exception as e:
-            logging.warning(f"{model} failed: {e}")
+            logging.warning(f"{model_id} failed: {e}")
 
-    return "Магія зникла... спробуй ще раз."
+    return "Зв'язок розірвано... темрява поглинула сигнал."
 
 # -------------------
 # SYSTEM PROMPT
@@ -289,11 +334,11 @@ LEONARD_IMG = "https://drive.google.com/uc?export=view&id=1_md3nAXLV5f08ohqHKOwu
 TRUST_STATES = [
     {"min": -999, "max": -2, "mode": "hostile", "tone": "холодний, різкий, відсторонений"},
     {"min": -1, "max": 5, "mode": "neutral", "tone": "стриманий, професійний"},
-    {"min": 5, "max": 15, "mode": "curious", "tone": "уважний, більше взаємодії"},
-    {"min": 15, "max": 30, "mode": "bonded", "tone": "захисний, інколи м’який, приховано емоційний"},
-    {"min": 30, "max": 50, "mode": "sympathy", "tone": "рідкісні погляди, спостерігає здалеку, провокує на емоції, злегка піддражнює"},
-    {"min": 50, "max": 75, "mode": "inlove", "tone": "захищає, але грубо, без ніжності, шукає привід бути поруч, ревнує"},
-    {"min": 75, "max": 999, "mode": "relationships", "tone": "втрачає контроль, діє імпульсивно, поцілунки, близкість"},
+    {"min": 5, "max": 10, "mode": "curious", "tone": "уважний, більше взаємодії"},
+    {"min": 10, "max": 15, "mode": "bonded", "tone": "захисний, інколи м’який, приховано емоційний"},
+    {"min": 15, "max": 20, "mode": "sympathy", "tone": "рідкісні погляди, спостерігає здалеку, провокує на емоції, злегка піддражнює"},
+    {"min": 20, "max": 25, "mode": "inlove", "tone": "захищає, але грубо, без ніжності, шукає привід бути поруч, ревнує"},
+    {"min": 25, "max": 999, "mode": "relationships", "tone": "втрачає контроль, діє імпульсивно, поцілунки, близкість"},
 ]
 
 
