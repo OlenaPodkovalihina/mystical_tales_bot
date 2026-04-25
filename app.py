@@ -126,7 +126,7 @@ def generate_with_fallback(prompt, leonard_trust_value):
                 config={
                     "system_instruction": f"Ти — Майор Леонард. Твій стан зараз: {dynamic_context}. Завжди пиши думки в дужках ().", 
                     "temperature": GENERATION_CONFIG["temperature"],
-                    "max_output_tokens": GENERATION_CONFIG["max_output_tokens"],
+
                 }
             )
             return response.text
