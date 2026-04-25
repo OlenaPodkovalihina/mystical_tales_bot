@@ -105,9 +105,10 @@ GENERATION_CONFIG = {
 
 # Твій список моделей (я додав сюди Pro, бо для дослідника це важливо)
 MODELS = [
-    "gemini-2.5-pro",    # Найрозумніша — для душі та драми
+
     "gemini-2.5-flash",  # Швидка і сучасна
     "gemini-2.0-flash"   # Надійний запасний варіант
+    "gemini-2.5-pro",    # Найрозумніша — для душі та драми
 ]
 
 def generate_with_fallback(prompt, leonard_trust_value):
@@ -480,7 +481,7 @@ def save_session(chat_id, session_data):
 # -------------------
 def build_prompt(user_text, session):
     history_text = "\n".join(
-        [f"{m['role']}: {m['text']}" for m in session["history"][-6:]]
+        [f"{m['role']}: {m['text']}" for m in session["history"][-8:]]
     )
 
     leonard = session["characters"]["leonard"]
