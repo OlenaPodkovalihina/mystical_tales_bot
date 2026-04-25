@@ -99,8 +99,7 @@ print([m.name for m in models])
 # 1. Виносимо конфіг окремо, щоб не дублювати
 GENERATION_CONFIG = {
     "temperature": 0.85,
-    "top_p": 0.95,
-    "max_output_tokens": 1000,
+    "max_output_tokens": 4000,
 }
 
 # Твій список моделей (я додав сюди Pro, бо для дослідника це важливо)
