@@ -112,46 +112,22 @@ MODELS = [
 ]
 
 def generate_with_fallback(prompt, leonard_trust_value):
-    # 1. Отримуємо опис поточного стану довіри
+    # МИ НЕ СТВОРЮЄМО НОВУ system_instruction ТУТ!
+    # Замість цього ми просто додаємо короткий технічний опис стану
     state = get_trust_state(leonard_trust_value)
     
-    # 2. Формуємо динамічну системну інструкцію (контекст для AI)
-    # Ми вставляємо всі твої змінні (WORLD, PLAYER, CHARACTERS) прямо сюди
-    system_instruction = f"""
-{SYSTEM_PROMPT}
+    # Використовуємо твій великий prompt як основу, 
+    # а в інструкцію виносимо ТІЛЬКИ динамічні емоції
+    dynamic_context = f"Рівень довіри: {leonard_trust_value}. Тон: {state['tone']}. Внутрішній режим: {state['mode']}."
 
-{WORLD}
-
-ГРАВЕЦЬ (Гелена):
-- Опис: {PLAYER['appearance']['height']}, {PLAYER['appearance']['hair']}, {PLAYER['appearance']['eyes']}
-- Характер: {", ".join(PLAYER['personality'])}
-- Особливість: {", ".join(PLAYER['abilities'])}
-
-ПЕРСОНАЖ (Леонард):
-{CHARACTERS['leonard']['description']}
-
-ПОТОЧНИЙ ПСИХОЛОГІЧНИЙ СТАН ЛЕОНАРДА:
-- Рівень довіри: {leonard_trust_value}
-- Режим поведінки: {state['mode']}
-- Тон розмови: {state['tone']}
-
-ОБОВ'ЯЗКОВІ ПРАВИЛА ВІДПОВІДІ:
-1. Починай кожну відповідь з внутрішніх думок у дужках ( ). 
-2. Думки мають бути максимально емоційними, щирими і часто суперечити холодним словам Леонарда.
-3. НІКОЛИ не пиши як асистент. Ти — Майор у небезпечному готелі.
-4. Якщо Гелена поводиться вперто або хаотично, Леонард може дратуватися зовні, але всередині (у думках) він починає поважати її за силу духу, якщо Trust > 5.
-"""
-
-    # 3. Цикл перемикання моделей (Fallback)
     for model_id in MODELS:
         try:
             response = client.models.generate_content(
                 model=model_id,
-                contents=prompt,
+                contents=prompt, # Твій великий промпт іде сюди повністю
                 config={
-                    "system_instruction": system_instruction,
+                    "system_instruction": f"Ти — Майор Леонард. Твій стан зараз: {dynamic_context}. Завжди пиши думки в дужках ().", 
                     "temperature": GENERATION_CONFIG["temperature"],
-                    "top_p": GENERATION_CONFIG["top_p"],
                     "max_output_tokens": GENERATION_CONFIG["max_output_tokens"],
                 }
             )
@@ -159,7 +135,7 @@ def generate_with_fallback(prompt, leonard_trust_value):
         except Exception as e:
             logging.warning(f"{model_id} failed: {e}")
 
-    return "Зв'язок розірвано... темрява поглинула сигнал."
+    return "Зв'язок розірвано..."
 
 # -------------------
 # SYSTEM PROMPT
