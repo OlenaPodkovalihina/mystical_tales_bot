@@ -96,24 +96,44 @@ client = genai.Client(api_key=GEMINI_KEY)
 models = client.models.list()
 print([m.name for m in models])
 
+# 1. Виносимо конфіг окремо, щоб не дублювати
+GENERATION_CONFIG = {
+    "temperature": 0.85,
+}
+
+# Твій список моделей (я додав сюди Pro, бо для дослідника це важливо)
 MODELS = [
-    "gemini-2.5-flash",
-    "gemini-2.0-flash",
-    "gemini-flash-latest"
+
+    "gemini-2.5-flash",  # Швидка і сучасна
+    "gemini-2.0-flash",   # Надійний запасний варіант
+    "gemini-2.5-pro",    # Найрозумніша — для душі та драми
 ]
 
-def generate_with_fallback(prompt):
-    for model in MODELS:
+def generate_with_fallback(prompt, leonard_trust_value):
+    # МИ НЕ СТВОРЮЄМО НОВУ system_instruction ТУТ!
+    # Замість цього ми просто додаємо короткий технічний опис стану
+    state = get_trust_state(leonard_trust_value)
+    
+    # Використовуємо твій великий prompt як основу, 
+    # а в інструкцію виносимо ТІЛЬКИ динамічні емоції
+    dynamic_context = f"Рівень довіри: {leonard_trust_value}. Тон: {state['tone']}. Внутрішній режим: {state['mode']}."
+
+    for model_id in MODELS:
         try:
             response = client.models.generate_content(
-                model=model,
-                contents=prompt
+                model=model_id,
+                contents=prompt, # Твій великий промпт іде сюди повністю
+                config={
+                    "system_instruction": f"Ти — Майор Леонард. Твій стан зараз: {dynamic_context}. Завжди пиши думки в дужках ().", 
+                    "temperature": GENERATION_CONFIG["temperature"],
+
+                }
             )
             return response.text
         except Exception as e:
-            logging.warning(f"{model} failed: {e}")
+            logging.warning(f"{model_id} failed: {e}")
 
-    return "Магія зникла... спробуй ще раз."
+    return "Зв'язок розірвано..."
 
 # -------------------
 # SYSTEM PROMPT
@@ -289,11 +309,11 @@ LEONARD_IMG = "https://drive.google.com/uc?export=view&id=1_md3nAXLV5f08ohqHKOwu
 TRUST_STATES = [
     {"min": -999, "max": -2, "mode": "hostile", "tone": "холодний, різкий, відсторонений"},
     {"min": -1, "max": 5, "mode": "neutral", "tone": "стриманий, професійний"},
-    {"min": 5, "max": 15, "mode": "curious", "tone": "уважний, більше взаємодії"},
-    {"min": 15, "max": 30, "mode": "bonded", "tone": "захисний, інколи м’який, приховано емоційний"},
-    {"min": 30, "max": 50, "mode": "sympathy", "tone": "рідкісні погляди, спостерігає здалеку, провокує на емоції, злегка піддражнює"},
-    {"min": 50, "max": 75, "mode": "inlove", "tone": "захищає, але грубо, без ніжності, шукає привід бути поруч, ревнує"},
-    {"min": 75, "max": 999, "mode": "relationships", "tone": "втрачає контроль, діє імпульсивно, поцілунки, близкість"},
+    {"min": 5, "max": 10, "mode": "curious", "tone": "уважний, більше взаємодії"},
+    {"min": 10, "max": 15, "mode": "bonded", "tone": "захисний, інколи м’який, приховано емоційний"},
+    {"min": 15, "max": 20, "mode": "sympathy", "tone": "рідкісні погляди, спостерігає здалеку, провокує на емоції, злегка піддражнює"},
+    {"min": 20, "max": 25, "mode": "inlove", "tone": "захищає, але грубо, без ніжності, шукає привід бути поруч, ревнує"},
+    {"min": 25, "max": 999, "mode": "relationships", "tone": "втрачає контроль, діє імпульсивно, поцілунки, близкість"},
 ]
 
 
@@ -435,7 +455,7 @@ def save_session(chat_id, session_data):
 # -------------------
 def build_prompt(user_text, session):
     history_text = "\n".join(
-        [f"{m['role']}: {m['text']}" for m in session["history"][-6:]]
+        [f"{m['role']}: {m['text']}" for m in session["history"][-8:]]
     )
 
     leonard = session["characters"]["leonard"]
@@ -511,6 +531,15 @@ def build_prompt(user_text, session):
 
 ДІЯ ГРАВЦЯ:
 {user_text}
+
+ФОРМАТ ВІДПОВІДІ:
+1. Текст від імені Леонарда (думки в дужках + пряма мова).
+2. В самому кінці повідомлення обов'язково виведи технічну інформацію:
+
+Стан гри:
+Локація: {session['state']['location']}
+Рівень довіри: {leonard['trust']}
+Статус Леонарда: {behavior_tone}
 """
 
 # -------------------
@@ -573,7 +602,11 @@ def webhook():
             session = get_session(chat_id)
             prompt = build_prompt(user_text, session)
 
-            story = generate_with_fallback(prompt)
+            # Отримуємо число довіри з сесії
+            current_trust = session["characters"]["leonard"]["trust"]
+
+            # Передаємо обидва аргументи у функцію
+            story = generate_with_fallback(prompt, current_trust)
             
             # 💾 ПАМ’ЯТЬ
             session["history"].append({"role": "user", "text": user_text})
